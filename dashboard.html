@@ -288,7 +288,7 @@
   // 若跟 taiwan_squawk_monitor.py 產生的 state.json 放在同一個目錄下，保持 'state.json' 即可。
   // 若改成部署在 GitHub Pages + 另外用排程更新 state.json，可以改成完整 URL，
   // 例如 'https://raw.githubusercontent.com/<user>/<repo>/main/state.json'
-  const STATE_URL = 'state.json';
+  const STATE_URL = 'https://raw.githubusercontent.com/a24626296/ATC/main/state.json';
   const REFRESH_MS = 60000;  // 每分鐘讀一次 state.json 就好，後端本身是 4 分鐘更新一次
   document.getElementById('pollSec').textContent = REFRESH_MS / 1000;
 
