@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>台灣空域緊急代碼監控</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #060a09;
+    --panel: #0c1614;
+    --panel-line: #163028;
+    --radar-green: #33ff99;
+    --radar-green-dim: #1c8f5c;
+    --amber: #ffb020;
+    --alert-red: #ff3b52;
+    --text: #d9ece5;
+    --text-dim: #6f8b83;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', sans-serif;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .app {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    height: 100vh;
+  }
+
+  /* ---- Top bar ---- */
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 22px;
+    border-bottom: 1px solid var(--panel-line);
+    background: linear-gradient(180deg, #0a1210, #060a09);
+  }
+
+  .topbar .title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 15px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--radar-green);
+  }
+
+  .title .sub {
+    display: block;
+    font-family: 'Inter', sans-serif;
+    text-transform: none;
+    letter-spacing: normal;
+    color: var(--text-dim);
+    font-size: 12px;
+    margin-top: 2px;
+  }
+
+  .status-cluster {
+    display: flex;
+    gap: 26px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+
+  .status-cluster .value {
+    color: var(--radar-green);
+    font-size: 15px;
+    display: block;
+  }
+
+  .status-cluster .label {
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-size: 10px;
+  }
+
+  .status-cluster .alert-count.has-alert .value {
+    color: var(--alert-red);
+    animation: pulse-text 1.2s infinite;
+  }
+
+  /* ---- Layout ---- */
+  .main {
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    height: 100%;
+    min-height: 0;
+  }
+
+  .map-wrap {
+    position: relative;
+    min-height: 0;
+  }
+
+  #map {
+    width: 100%;
+    height: 100%;
+    background: var(--bg);
+  }
+
+  /* radar sweep overlay */
+  .sweep-overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 450;
+    overflow: hidden;
+  }
+
+  .sweep {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 220vmax;
+    height: 220vmax;
+    margin-top: -110vmax;
+    margin-left: -110vmax;
+    background: conic-gradient(from 0deg, rgba(51,255,153,0.16), rgba(51,255,153,0) 26%);
+    animation: spin 5s linear infinite;
+    mix-blend-mode: screen;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes pulse-text { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+  /* ---- Sidebar ---- */
+  .sidebar {
+    border-left: 1px solid var(--panel-line);
+    background: var(--panel);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .sidebar h2 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    padding: 16px 18px 8px;
+    margin: 0;
+  }
+
+  .alert-list {
+    overflow-y: auto;
+    flex: 1;
+    padding: 0 12px 12px;
+  }
+
+  .alert-card {
+    border: 1px solid var(--alert-red);
+    background: rgba(255,59,82,0.08);
+    border-radius: 6px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+    animation: pulse-border 1.6s infinite;
+  }
+
+  @keyframes pulse-border {
+    0%,100% { box-shadow: 0 0 0 rgba(255,59,82,0); }
+    50% { box-shadow: 0 0 14px rgba(255,59,82,0.45); }
+  }
+
+  .alert-card .callsign {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 15px;
+    color: #fff;
+  }
+
+  .alert-card .code {
+    display: inline-block;
+    margin-top: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--alert-red);
+    background: rgba(255,59,82,0.15);
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+
+  .alert-card .meta {
+    margin-top: 6px;
+    font-size: 11px;
+    color: var(--text-dim);
+    line-height: 1.5;
+  }
+
+  .empty-state {
+    padding: 18px;
+    color: var(--text-dim);
+    font-size: 13px;
+    line-height: 1.6;
+  }
+
+  .empty-state .glyph {
+    color: var(--radar-green-dim);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 22px;
+    display: block;
+    margin-bottom: 6px;
+  }
+
+  .legend {
+    padding: 12px 18px 16px;
+    border-top: 1px solid var(--panel-line);
+    font-size: 11px;
+    color: var(--text-dim);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .legend .row { display: flex; align-items: center; gap: 8px; }
+  .legend .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .dot.normal { background: var(--radar-green-dim); }
+  .dot.emergency { background: var(--alert-red); }
+
+  /* Leaflet dark tweaks */
+  .leaflet-container { background: var(--bg); }
+  .leaflet-control-attribution {
+    background: rgba(6,10,9,0.7) !important;
+    color: var(--text-dim) !important;
+  }
+  .leaflet-control-attribution a { color: var(--radar-green-dim) !important; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="topbar">
+    <div class="title">
+      台灣空域監控 · SQUAWK WATCH
+      <span class="sub">資料來源 OpenSky Network · 每 <span id="pollSec">30</span> 秒更新</span>
+    </div>
+    <div class="status-cluster">
+      <div>
+        <span class="value" id="lastUpdate">--:--:--</span>
+        <span class="label">最後更新 (本地時間)</span>
+      </div>
+      <div>
+        <span class="value" id="aircraftCount">0</span>
+        <span class="label">空域內航機</span>
+      </div>
+      <div class="alert-count" id="alertCluster">
+        <span class="value" id="alertCount">0</span>
+        <span class="label">緊急事件</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="map-wrap">
+      <div id="map"></div>
+      <div class="sweep-overlay"><div class="sweep"></div></div>
+    </div>
+
+    <div class="sidebar">
+      <h2>Active Alerts</h2>
+      <div class="alert-list" id="alertList">
+        <div class="empty-state">
+          <span class="glyph">◎</span>
+          目前空域內無緊急代碼事件。<br>
+          偵測到 squawk 7500 / 7600 / 7700 時會即時顯示於此，並透過 Telegram 推播。
+        </div>
+      </div>
+      <div class="legend">
+        <div class="row"><span class="dot normal"></span> 一般航機</div>
+        <div class="row"><span class="dot emergency"></span> 緊急代碼 (7500 / 7600 / 7700)</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+  // ---- 設定：state.json 的位置 ----
+  // 若跟 taiwan_squawk_monitor.py 產生的 state.json 放在同一個目錄下，保持 'state.json' 即可。
+  // 若改成部署在 GitHub Pages + 另外用排程更新 state.json，可以改成完整 URL，
+  // 例如 'https://raw.githubusercontent.com/<user>/<repo>/main/state.json'
+  const STATE_URL = 'state.json';
+  const REFRESH_MS = 60000;  // 每分鐘讀一次 state.json 就好，後端本身是 4 分鐘更新一次
+  document.getElementById('pollSec').textContent = REFRESH_MS / 1000;
+
+  const SQUAWK_MEANING = {
+    '7500': '劫機 Hijack',
+    '7600': '通訊/無線電失效 Radio Failure',
+    '7700': '一般緊急 General Emergency',
+  };
+
+  const map = L.map('map', { zoomControl: true, attributionControl: true })
+    .setView([23.6, 120.9], 7);
+
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '&copy; OpenStreetMap &copy; CARTO',
+    subdomains: 'abcd',
+    maxZoom: 19,
+  }).addTo(map);
+
+  let markers = {};
+
+  function iconFor(isEmergency) {
+    const color = isEmergency ? '#ff3b52' : '#33ff99';
+    const size = isEmergency ? 14 : 9;
+    return L.divIcon({
+      className: '',
+      html: `<div style="
+        width:${size}px;height:${size}px;border-radius:50%;
+        background:${color};
+        box-shadow:0 0 ${isEmergency ? 16 : 6}px ${color};
+        ${isEmergency ? 'animation: blip 1s infinite;' : ''}
+      "></div>
+      <style>@keyframes blip{0%,100%{opacity:1}50%{opacity:.35}}</style>`,
+      iconSize: [size, size],
+      iconAnchor: [size / 2, size / 2],
+    });
+  }
+
+  function renderAircraft(state) {
+    const seen = new Set();
+    (state.all_aircraft || []).forEach(a => {
+      if (a.latitude == null || a.longitude == null) return;
+      const isEmergency = ['7500', '7600', '7700'].includes(a.squawk);
+      seen.add(a.icao24);
+      const popupHtml = `
+        <div style="font-family:'JetBrains Mono',monospace;font-size:12px;">
+          <b>${a.callsign || a.icao24}</b><br>
+          Squawk: ${a.squawk || '—'} ${isEmergency ? '(' + (SQUAWK_MEANING[a.squawk] || '') + ')' : ''}<br>
+          Alt: ${a.altitude_m ?? '—'} m &nbsp; Spd: ${a.velocity ?? '—'} m/s<br>
+          Origin: ${a.origin_country || '—'}
+        </div>`;
+
+      if (markers[a.icao24]) {
+        markers[a.icao24].setLatLng([a.latitude, a.longitude]);
+        markers[a.icao24].setIcon(iconFor(isEmergency));
+        markers[a.icao24].setPopupContent(popupHtml);
+      } else {
+        markers[a.icao24] = L.marker([a.latitude, a.longitude], { icon: iconFor(isEmergency) })
+          .bindPopup(popupHtml)
+          .addTo(map);
+      }
+    });
+
+    Object.keys(markers).forEach(id => {
+      if (!seen.has(id)) {
+        map.removeLayer(markers[id]);
+        delete markers[id];
+      }
+    });
+  }
+
+  function renderAlerts(state) {
+    const alerts = Object.values(state.active_alerts || {});
+    const listEl = document.getElementById('alertList');
+    const countEl = document.getElementById('alertCount');
+    const clusterEl = document.getElementById('alertCluster');
+
+    countEl.textContent = alerts.length;
+    clusterEl.classList.toggle('has-alert', alerts.length > 0);
+
+    if (alerts.length === 0) {
+      listEl.innerHTML = `
+        <div class="empty-state">
+          <span class="glyph">◎</span>
+          目前空域內無緊急代碼事件。<br>
+          偵測到 squawk 7500 / 7600 / 7700 時會即時顯示於此，並透過 Telegram 推播。
+        </div>`;
+      return;
+    }
+
+    listEl.innerHTML = alerts.map(a => `
+      <div class="alert-card">
+        <div class="callsign">${a.callsign || a.icao24}</div>
+        <span class="code">SQUAWK ${a.squawk} · ${SQUAWK_MEANING[a.squawk] || ''}</span>
+        <div class="meta">
+          位置: ${a.latitude?.toFixed(3)}, ${a.longitude?.toFixed(3)}<br>
+          高度: ${a.altitude_m ?? '—'} m &nbsp;|&nbsp; 國籍: ${a.origin_country || '—'}
+        </div>
+      </div>
+    `).join('');
+  }
+
+  async function refresh() {
+    try {
+      const res = await fetch(STATE_URL, { cache: 'no-store' });
+      if (!res.ok) throw new Error('state.json 讀取失敗: ' + res.status);
+      const state = await res.json();
+
+      document.getElementById('aircraftCount').textContent = (state.all_aircraft || []).length;
+      if (state.last_update) {
+        document.getElementById('lastUpdate').textContent =
+          new Date(state.last_update).toLocaleTimeString('zh-TW', { hour12: false });
+      }
+
+      renderAircraft(state);
+      renderAlerts(state);
+    } catch (err) {
+      console.error(err);
+      document.getElementById('lastUpdate').textContent = '讀取失敗';
+    }
+  }
+
+  refresh();
+  setInterval(refresh, REFRESH_MS);
+</script>
+</body>
+</html>
