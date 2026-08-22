@@ -4,6 +4,8 @@
 ------------------------------------------------------
 資料來源：OpenSky Network REST API (https://opensky-network.org)
 通知方式：Telegram Bot API 推播
+互動查詢：在 Telegram 對話框直接輸入航班呼號（例如 CAL781），排程下次執行時
+          會回覆該航班目前在監控空域內的即時狀態（非即時聊天，會有排程間隔的延遲）
 
 執行模式：單次執行（poll 一次就結束），設計給排程器（cron / GitHub Actions）
           每隔幾分鐘呼叫一次，本地端不需要開著機器常駐執行。
@@ -118,13 +120,14 @@ def parse_aircraft(raw):
 
 # ---------- Telegram 推播 ----------
 
-def send_telegram_push(text):
-    if not (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID):
-        print("[提醒] 未設定 TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID，略過推播")
+def send_telegram_push(text, chat_id=None):
+    target = chat_id or TELEGRAM_CHAT_ID
+    if not (TELEGRAM_BOT_TOKEN and target):
+        print("[提醒] 未設定 TELEGRAM_BOT_TOKEN / chat id，略過推播")
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     body = json.dumps({
-        "chat_id": TELEGRAM_CHAT_ID,
+        "chat_id": target,
         "text": text,
         "disable_web_page_preview": True,
     }).encode("utf-8")
@@ -133,9 +136,95 @@ def send_telegram_push(text):
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             resp.read()
-        print("[Telegram] 已推播")
+        print(f"[Telegram] 已推播給 {target}")
     except urllib.error.HTTPError as e:
         print(f"[錯誤] Telegram 推播失敗：{e.code} {e.read()}")
+
+
+def get_telegram_updates(offset):
+    """抓取自 offset 之後的新訊息（getUpdates 是輪詢式 API，不需要 webhook / 常駐伺服器）"""
+    if not TELEGRAM_BOT_TOKEN:
+        return []
+    params = urllib.parse.urlencode({"offset": offset, "timeout": 0})
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates?{params}"
+    try:
+        with urllib.request.urlopen(url, timeout=15) as resp:
+            data = json.loads(resp.read())
+        return data.get("result", [])
+    except Exception as e:
+        print(f"[錯誤] 讀取 Telegram getUpdates 失敗：{e}")
+        return []
+
+
+def format_flight_status(a):
+    is_emergency = a["squawk"] in EMERGENCY_CODES
+    lines = [
+        f"✈️ {a['callsign'] or a['icao24']}",
+        f"Squawk: {a['squawk'] or '—'}" + (f" ⚠️ {SQUAWK_MEANING.get(a['squawk'], '')}" if is_emergency else ""),
+        f"狀態: {'地面' if a['on_ground'] else '飛行中'}",
+        f"位置: {a['latitude']:.3f}, {a['longitude']:.3f}" if a["latitude"] is not None else "位置: —",
+        f"高度: {a['altitude_m']} m" if a["altitude_m"] is not None else "高度: —",
+        f"地速: {a['velocity']} m/s" if a["velocity"] is not None else "地速: —",
+        f"航向: {a['heading']}°" if a["heading"] is not None else "航向: —",
+        f"國籍: {a['origin_country'] or '—'}",
+    ]
+    return "\n".join(lines)
+
+
+def handle_telegram_commands(state, aircraft):
+    """查詢當前這批空域資料裡有沒有使用者輸入的航班編號，並回覆查詢者。
+    只在排程執行的當下處理一次，所以查詢後最多要等到下一輪排程（例如 5 分鐘）才會收到回覆，
+    不是即時聊天機器人。"""
+    if not TELEGRAM_BOT_TOKEN:
+        return state
+
+    offset = state.get("telegram_last_update_id", 0) + 1
+    updates = get_telegram_updates(offset)
+
+    for update in updates:
+        state["telegram_last_update_id"] = update["update_id"]
+        message = update.get("message") or update.get("edited_message")
+        if not message or "text" not in message:
+            continue
+
+        chat_id = message["chat"]["id"]
+        text = message["text"].strip()
+
+        if text.startswith("/start") or text.startswith("/help"):
+            send_telegram_push(
+                "👋 台灣空域監控 Bot\n"
+                "直接輸入航班呼號（例如 CAL781、EVA067、SJX800），\n"
+                "我會回覆該航班目前在監控空域內的即時狀態。\n"
+                "（排程每隔幾分鐘跑一次，查詢後可能要等一下才會收到回覆）",
+                chat_id,
+            )
+            continue
+
+        query = text.upper().replace(" ", "")
+        if not query:
+            continue
+
+        # 先找完全相符，找不到再找呼號開頭相符（例如只打航空公司代碼）
+        match = next((a for a in aircraft if a["callsign"].upper() == query), None)
+        if not match:
+            candidates = [a for a in aircraft if a["callsign"].upper().startswith(query)]
+            if len(candidates) == 1:
+                match = candidates[0]
+            elif len(candidates) > 1:
+                names = ", ".join(a["callsign"] for a in candidates[:10])
+                send_telegram_push(f"🔍 找到多個符合 \"{text}\" 的航班：{names}\n請輸入完整呼號查詢", chat_id)
+                continue
+
+        if match:
+            send_telegram_push(format_flight_status(match), chat_id)
+        else:
+            send_telegram_push(
+                f"❓ 目前監控空域內查無航班 \"{text}\"\n"
+                f"（可能已降落、不在台灣周邊空域內，或呼號打錯）",
+                chat_id,
+            )
+
+    return state
 
 
 # ---------- 狀態存取 ----------
@@ -147,7 +236,14 @@ def load_state():
                 return json.load(f)
         except json.JSONDecodeError:
             pass
-    return {"active_alerts": {}, "history": [], "all_aircraft": [], "last_update": None, "bbox": BBOX}
+    return {
+        "active_alerts": {},
+        "history": [],
+        "all_aircraft": [],
+        "last_update": None,
+        "bbox": BBOX,
+        "telegram_last_update_id": 0,
+    }
 
 
 def save_state(state):
@@ -164,6 +260,9 @@ def poll_once(token, state):
     raw = fetch_states(token)
     aircraft = parse_aircraft(raw)
     now_iso = datetime.now(timezone.utc).isoformat()
+
+    # 處理使用者在 Telegram 上輸入的航班查詢（用這批剛抓到的即時資料回覆）
+    state = handle_telegram_commands(state, aircraft)
 
     current_emergency = {
         a["icao24"]: a for a in aircraft if a["squawk"] in EMERGENCY_CODES
