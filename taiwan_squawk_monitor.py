@@ -46,7 +46,7 @@ BBOX = {
 POLL_INTERVAL_SEC = 300           # --loop 模式下的輪詢間隔（5 分鐘）。
                                    # 若用 GitHub Actions 排程，實際間隔由 workflow 的 cron 決定，
                                    # 這個常數對排程模式沒有作用，只是保留給本機常駐測試用。
-EMERGENCY_CODES = {"7500", "7600", "7700"}
+EMERGENCY_CODES = {"7500", "7600", "7700", "2612"}
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")
 OPENSKY_URL = "https://opensky-network.org/api/states/all"
 OPENSKY_TOKEN_URL = (
