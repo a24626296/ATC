@@ -1,0 +1,34 @@
+name: Taiwan Squawk Monitor
+
+on:
+  schedule:
+    # GitHub Actions 排程最短間隔是 5 分鐘，且觸發時間不保證精準（尖峰時段可能延遲）
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}   # 允許在 GitHub 網頁上手動點「Run workflow」測試
+
+permissions:
+  contents: write   # 需要 write 權限才能把 state.json commit 回 repo
+
+concurrency:
+  group: taiwan-squawk-monitor
+  cancel-in-progress: false   # 避免上一次還沒跑完，下一次排程就把它取消，導致 state.json 沒存到
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # 這支腳本只用 Python 標準函式庫，不需要 pip install 任何套件
+
+      - name: Run monitor (single poll)
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          OPENSKY_CLIENT_ID: ${{
