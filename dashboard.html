@@ -212,20 +212,83 @@
     margin-bottom: 6px;
   }
 
-  .legend {
-    padding: 12px 18px 16px;
-    border-top: 1px solid var(--panel-line);
-    font-size: 11px;
-    color: var(--text-dim);
+  .sidebar-tabs {
     display: flex;
-    flex-direction: column;
-    gap: 6px;
+    border-bottom: 1px solid var(--panel-line);
   }
 
-  .legend .row { display: flex; align-items: center; gap: 8px; }
-  .legend .dot { width: 8px; height: 8px; border-radius: 50%; }
-  .dot.normal { background: var(--radar-green-dim); }
-  .dot.emergency { background: var(--alert-red); }
+  .sidebar-tab {
+    flex: 1;
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 14px 8px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+  }
+
+  .sidebar-tab.active {
+    color: var(--radar-green);
+    border-bottom-color: var(--radar-green);
+  }
+
+  .sidebar-tab .count {
+    margin-left: 4px;
+    color: inherit;
+    opacity: 0.7;
+  }
+
+  .history-card {
+    border: 1px solid var(--panel-line);
+    background: rgba(255,255,255,0.02);
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+  }
+
+  .history-card .callsign {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    color: var(--text);
+  }
+
+  .history-card .code {
+    display: inline-block;
+    margin-top: 3px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--amber);
+    background: rgba(255,176,32,0.12);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  .history-card .meta {
+    margin-top: 5px;
+    font-size: 10px;
+    color: var(--text-dim);
+    line-height: 1.5;
+  }
+
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  .airline-legend {
+    padding: 12px 18px 16px;
+    border-top: 1px solid var(--panel-line);
+    font-size: 10px;
+    color: var(--text-dim);
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 12px;
+  }
+
+  .airline-legend .row { display: flex; align-items: center; gap: 6px; }
+  .airline-legend .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 
   /* Leaflet dark tweaks */
   .leaflet-container { background: var(--bg); }
@@ -266,17 +329,41 @@
     </div>
 
     <div class="sidebar">
-      <h2>Active Alerts</h2>
-      <div class="alert-list" id="alertList">
+      <div class="sidebar-tabs">
+        <button class="sidebar-tab active" id="tabActive" onclick="switchTab('active')">
+          Active Alerts <span class="count" id="tabActiveCount">(0)</span>
+        </button>
+        <button class="sidebar-tab" id="tabHistory" onclick="switchTab('history')">
+          History <span class="count" id="tabHistoryCount">(0)</span>
+        </button>
+      </div>
+
+      <div class="alert-list panel active" id="panelActive">
         <div class="empty-state">
           <span class="glyph">◎</span>
           目前空域內無緊急代碼事件。<br>
           偵測到 squawk 7500 / 7600 / 7700 時會即時顯示於此，並透過 Telegram 推播。
         </div>
       </div>
-      <div class="legend">
-        <div class="row"><span class="dot normal"></span> 一般航機</div>
-        <div class="row"><span class="dot emergency"></span> 緊急代碼 (7500 / 7600 / 7700)</div>
+
+      <div class="alert-list panel" id="panelHistory">
+        <div class="empty-state">
+          <span class="glyph">◎</span>
+          自系統啟動以來，尚無緊急代碼歷史紀錄。
+        </div>
+      </div>
+
+      <div class="airline-legend">
+        <div class="row"><span class="dot" style="background:#ff6fae"></span>華航 CAL</div>
+        <div class="row"><span class="dot" style="background:#ffffff;box-shadow:0 0 0 2px #2ecc71 inset"></span>長榮 EVA</div>
+        <div class="row"><span class="dot" style="background:#4aa3ff"></span>華信 MDA</div>
+        <div class="row"><span class="dot" style="background:#ffd43b"></span>虎航 TTW</div>
+        <div class="row"><span class="dot" style="background:#c7ccd1"></span>星宇 SJX</div>
+        <div class="row"><span class="dot" style="background:#8a5a3b"></span>德安 DAC</div>
+        <div class="row"><span class="dot" style="background:#ffffff;box-shadow:0 0 0 1px #6f8b83 inset"></span>立榮 UIA</div>
+        <div class="row"><span class="dot" style="background:#ffe066"></span>安捷 APX</div>
+        <div class="row"><span class="dot" style="background:var(--radar-green-dim)"></span>其他航機</div>
+        <div class="row"><span class="dot" style="background:var(--alert-red)"></span>緊急代碼</div>
       </div>
     </div>
   </div>
@@ -298,6 +385,24 @@
     '7700': '一般緊急 General Emergency',
   };
 
+  // 依 ICAO 呼號前綴對應航空公司顏色。white 系需要邊框才能在深色地圖上看得清楚。
+  const AIRLINE_COLORS = {
+    CAL: { fill: '#ff6fae', name: '華航' },
+    EVA: { fill: '#ffffff', ring: '#2ecc71', name: '長榮' },
+    MDA: { fill: '#4aa3ff', name: '華信' },
+    TTW: { fill: '#ffd43b', name: '虎航' },
+    SJX: { fill: '#c7ccd1', name: '星宇' },
+    DAC: { fill: '#8a5a3b', name: '德安' },
+    UIA: { fill: '#ffffff', ring: '#6f8b83', name: '立榮' },
+    APX: { fill: '#ffe066', name: '安捷' },
+  };
+
+  function airlineFor(callsign) {
+    if (!callsign) return null;
+    const prefix = callsign.slice(0, 3).toUpperCase();
+    return AIRLINE_COLORS[prefix] || null;
+  }
+
   const map = L.map('map', { zoomControl: true, attributionControl: true })
     .setView([23.6, 120.9], 7);
 
@@ -309,20 +414,34 @@
 
   let markers = {};
 
-  function iconFor(isEmergency) {
-    const color = isEmergency ? '#ff3b52' : '#33ff99';
-    const size = isEmergency ? 14 : 9;
+  function iconFor(isEmergency, callsign) {
+    if (isEmergency) {
+      const color = '#ff3b52';
+      return L.divIcon({
+        className: '',
+        html: `<div style="
+          width:14px;height:14px;border-radius:50%;
+          background:${color};
+          box-shadow:0 0 16px ${color};
+          animation: blip 1s infinite;
+        "></div>
+        <style>@keyframes blip{0%,100%{opacity:1}50%{opacity:.35}}</style>`,
+        iconSize: [14, 14],
+        iconAnchor: [7, 7],
+      });
+    }
+    const airline = airlineFor(callsign);
+    const color = airline ? airline.fill : '#33ff99';
+    const ringStyle = airline && airline.ring ? `box-shadow:0 0 0 2px ${airline.ring} inset, 0 0 6px ${color};` : `box-shadow:0 0 6px ${color};`;
     return L.divIcon({
       className: '',
       html: `<div style="
-        width:${size}px;height:${size}px;border-radius:50%;
+        width:9px;height:9px;border-radius:50%;
         background:${color};
-        box-shadow:0 0 ${isEmergency ? 16 : 6}px ${color};
-        ${isEmergency ? 'animation: blip 1s infinite;' : ''}
-      "></div>
-      <style>@keyframes blip{0%,100%{opacity:1}50%{opacity:.35}}</style>`,
-      iconSize: [size, size],
-      iconAnchor: [size / 2, size / 2],
+        ${ringStyle}
+      "></div>`,
+      iconSize: [9, 9],
+      iconAnchor: [4.5, 4.5],
     });
   }
 
@@ -331,10 +450,11 @@
     (state.all_aircraft || []).forEach(a => {
       if (a.latitude == null || a.longitude == null) return;
       const isEmergency = ['7500', '7600', '7700'].includes(a.squawk);
+      const airline = airlineFor(a.callsign);
       seen.add(a.icao24);
       const popupHtml = `
         <div style="font-family:'JetBrains Mono',monospace;font-size:12px;">
-          <b>${a.callsign || a.icao24}</b><br>
+          <b>${a.callsign || a.icao24}</b> ${airline ? '· ' + airline.name : ''}<br>
           Squawk: ${a.squawk || '—'} ${isEmergency ? '(' + (SQUAWK_MEANING[a.squawk] || '') + ')' : ''}<br>
           Alt: ${a.altitude_m ?? '—'} m &nbsp; Spd: ${a.velocity ?? '—'} m/s<br>
           Origin: ${a.origin_country || '—'}
@@ -342,10 +462,10 @@
 
       if (markers[a.icao24]) {
         markers[a.icao24].setLatLng([a.latitude, a.longitude]);
-        markers[a.icao24].setIcon(iconFor(isEmergency));
+        markers[a.icao24].setIcon(iconFor(isEmergency, a.callsign));
         markers[a.icao24].setPopupContent(popupHtml);
       } else {
-        markers[a.icao24] = L.marker([a.latitude, a.longitude], { icon: iconFor(isEmergency) })
+        markers[a.icao24] = L.marker([a.latitude, a.longitude], { icon: iconFor(isEmergency, a.callsign) })
           .bindPopup(popupHtml)
           .addTo(map);
       }
@@ -361,11 +481,13 @@
 
   function renderAlerts(state) {
     const alerts = Object.values(state.active_alerts || {});
-    const listEl = document.getElementById('alertList');
+    const listEl = document.getElementById('panelActive');
     const countEl = document.getElementById('alertCount');
     const clusterEl = document.getElementById('alertCluster');
+    const tabCountEl = document.getElementById('tabActiveCount');
 
     countEl.textContent = alerts.length;
+    tabCountEl.textContent = `(${alerts.length})`;
     clusterEl.classList.toggle('has-alert', alerts.length > 0);
 
     if (alerts.length === 0) {
@@ -390,6 +512,44 @@
     `).join('');
   }
 
+  function renderHistory(state) {
+    const history = (state.history || []).slice().reverse(); // 新的在上面
+    const listEl = document.getElementById('panelHistory');
+    const tabCountEl = document.getElementById('tabHistoryCount');
+
+    tabCountEl.textContent = `(${history.length})`;
+
+    if (history.length === 0) {
+      listEl.innerHTML = `
+        <div class="empty-state">
+          <span class="glyph">◎</span>
+          自系統啟動以來，尚無緊急代碼歷史紀錄。
+        </div>`;
+      return;
+    }
+
+    listEl.innerHTML = history.map(a => {
+      const t = a.detected_at ? new Date(a.detected_at).toLocaleString('zh-TW', { hour12: false }) : '—';
+      return `
+        <div class="history-card">
+          <div class="callsign">${a.callsign || a.icao24}</div>
+          <span class="code">SQUAWK ${a.squawk} · ${SQUAWK_MEANING[a.squawk] || ''}</span>
+          <div class="meta">
+            偵測時間: ${t}<br>
+            位置: ${a.latitude?.toFixed?.(3) ?? '—'}, ${a.longitude?.toFixed?.(3) ?? '—'} &nbsp;|&nbsp; 國籍: ${a.origin_country || '—'}
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  function switchTab(tab) {
+    document.getElementById('tabActive').classList.toggle('active', tab === 'active');
+    document.getElementById('tabHistory').classList.toggle('active', tab === 'history');
+    document.getElementById('panelActive').classList.toggle('active', tab === 'active');
+    document.getElementById('panelHistory').classList.toggle('active', tab === 'history');
+  }
+  window.switchTab = switchTab;
+
   async function refresh() {
     try {
       const res = await fetch(STATE_URL, { cache: 'no-store' });
@@ -404,6 +564,7 @@
 
       renderAircraft(state);
       renderAlerts(state);
+      renderHistory(state);
     } catch (err) {
       console.error(err);
       document.getElementById('lastUpdate').textContent = '讀取失敗';
