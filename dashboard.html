@@ -297,6 +297,68 @@
     color: var(--text-dim) !important;
   }
   .leaflet-control-attribution a { color: var(--radar-green-dim) !important; }
+
+  /* ---- Windy toggle ---- */
+  .windy-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  .windy-switch {
+    position: relative;
+    width: 40px;
+    height: 20px;
+    border-radius: 10px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid var(--panel-line);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.2s;
+  }
+
+  .windy-switch::after {
+    content: '';
+    position: absolute;
+    top: 1px;
+    left: 1px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    transition: transform 0.2s, background 0.2s;
+  }
+
+  .windy-switch.on {
+    background: rgba(51,255,153,0.18);
+    border-color: var(--radar-green-dim);
+  }
+
+  .windy-switch.on::after {
+    transform: translateX(20px);
+    background: var(--radar-green);
+    box-shadow: 0 0 6px var(--radar-green);
+  }
+
+  .windy-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 500;
+    display: none;
+  }
+
+  .windy-overlay.active { display: block; }
+
+  .windy-overlay iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+  }
 </style>
 </head>
 <body>
@@ -307,6 +369,10 @@
       <span class="sub">資料來源 OpenSky Network · 每 <span id="pollSec">30</span> 秒更新</span>
     </div>
     <div class="status-cluster">
+      <div class="windy-toggle">
+        <span>Windy</span>
+        <div class="windy-switch" id="windySwitch" onclick="toggleWindy()"></div>
+      </div>
       <div>
         <span class="value" id="lastUpdate">--:--:--</span>
         <span class="label">最後更新 (本地時間)</span>
@@ -326,6 +392,9 @@
     <div class="map-wrap">
       <div id="map"></div>
       <div class="sweep-overlay"><div class="sweep"></div></div>
+      <div class="windy-overlay" id="windyOverlay">
+        <iframe id="windyFrame" title="Windy 風場圖層" loading="lazy"></iframe>
+      </div>
     </div>
 
     <div class="sidebar">
@@ -402,6 +471,25 @@
     const prefix = callsign.slice(0, 3).toUpperCase();
     return AIRLINE_COLORS[prefix] || null;
   }
+
+  // ---- Windy 圖層開關 ----
+  // 用獨立的 iframe (windy.html) 顯示 Windy 地圖，避免它內部的 Leaflet 1.4.0
+  // 跟這頁航機地圖用的 Leaflet 1.9.4 互相衝突。
+  // 第一次打開才載入 iframe（lazy load），關閉時只隱藏，不會重複重新載入。
+  let windyLoaded = false;
+
+  function toggleWindy() {
+    const overlay = document.getElementById('windyOverlay');
+    const sw = document.getElementById('windySwitch');
+    const isOn = overlay.classList.toggle('active');
+    sw.classList.toggle('on', isOn);
+
+    if (isOn && !windyLoaded) {
+      document.getElementById('windyFrame').src = 'windy.html';
+      windyLoaded = true;
+    }
+  }
+  window.toggleWindy = toggleWindy;
 
   const map = L.map('map', { zoomControl: true, attributionControl: true })
     .setView([23.6, 120.9], 7);

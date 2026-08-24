@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, shrink-to-fit=no" />
+<title>Windy 風場圖層</title>
+<!--
+  重要：這裡故意用獨立的 iframe 頁面來放 Windy 地圖，
+  是因為 Windy Map Forecast API 內部綁定 Leaflet 1.4.0，
+  跟主 dashboard.html 用的 Leaflet 1.9.4 版本會互相衝突（都佔用全域變數 L）。
+  分開成獨立頁面，兩邊 Leaflet 各自運作互不影響。
+-->
+<script src="https://unpkg.com/leaflet@1.4.0/dist/leaflet.js"></script>
+<script src="https://api.windy.com/assets/map-forecast/libBoot.js"></script>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #060a09; }
+  #windy { width: 100%; height: 100%; }
+  #key-warning {
+    position: absolute;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: #060a09;
+    color: #d9ece5;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    text-align: center;
+    padding: 24px;
+    box-sizing: border-box;
+    line-height: 1.7;
+    z-index: 999;
+  }
+  #key-warning a { color: #33ff99; }
+</style>
+</head>
+<body>
+  <div id="windy"></div>
+  <div id="key-warning">
+    ⚠️ 尚未設定 Windy API Key<br>
+    請先到 <a href="https://api.windy.com/keys" target="_blank">api.windy.com/keys</a> 免費申請一組
+    "Map Forecast Domain key"，<br>
+    並把你的網域（例如 a24626296.github.io）加進允許清單，<br>
+    再把拿到的 key 貼到這個檔案裡的 <code>WINDY_API_KEY</code> 常數。
+  </div>
+
+  <script>
+    // ------------------------------------------------------------------
+    // 把下面這行換成你自己申請的 Windy API Key（免費，但要在 Windy 帳號後台
+    // 把你的 GitHub Pages 網域加進允許清單，不然地圖會顯示 unauthorized）
+    // ------------------------------------------------------------------
+    const WINDY_API_KEY = 'YOUR_WINDY_API_KEY_HERE';
+
+    if (!WINDY_API_KEY || WINDY_API_KEY === 'YOUR_WINDY_API_KEY_HERE') {
+      document.getElementById('key-warning').style.display = 'flex';
+    } else {
+      const options = {
+        key: WINDY_API_KEY,
+        lat: 23.6,
+        lon: 120.9,
+        zoom: 6,
+        overlay: 'wind',   // 預設圖層：風場流線動畫。可選 rain / clouds / temp / pressure / currents / waves
+      };
+
+      windyInit(options, windyAPI => {
+        const { store } = windyAPI;
+        // 之後如果想讓 dashboard 那邊透過 postMessage 切換圖層，可以在這裡加 message listener：
+        window.addEventListener('message', (event) => {
+          if (event.data && event.data.type === 'windy-set-overlay') {
+            store.set('overlay', event.data.overlay);
+          }
+        });
+      });
+    }
+  </script>
+</body>
+</html>
