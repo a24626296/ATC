@@ -243,11 +243,36 @@
   }
 
   .history-card {
+    position: relative;
     border: 1px solid var(--panel-line);
     background: rgba(255,255,255,0.02);
     border-radius: 6px;
-    padding: 10px 12px;
+    padding: 10px 32px 10px 12px;
     margin-bottom: 8px;
+  }
+
+  .delete-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    background: none;
+    color: var(--text-dim);
+    font-size: 12px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .delete-btn:hover {
+    color: var(--alert-red);
+    border-color: var(--alert-red);
+    background: rgba(255,59,82,0.08);
   }
 
   .history-card .callsign {
@@ -359,6 +384,36 @@
     height: 100%;
     border: none;
   }
+  .refresh-btn {
+    background: none;
+    border: 1px solid var(--panel-line);
+    border-radius: 4px;
+    color: var(--radar-green);
+    width: 22px;
+    height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    margin-left: 8px;
+    padding: 0;
+    vertical-align: middle;
+    transition: border-color 0.15s;
+  }
+
+  .refresh-btn:hover { border-color: var(--radar-green-dim); }
+
+  .refresh-btn svg {
+    width: 12px;
+    height: 12px;
+    transition: transform 0.5s;
+  }
+
+  .refresh-btn.spinning svg {
+    animation: spin-once 0.6s linear;
+  }
+
+  @keyframes spin-once { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
@@ -375,7 +430,15 @@
       </div>
       <div>
         <span class="value" id="lastUpdate">--:--:--</span>
-        <span class="label">最後更新 (本地時間)</span>
+        <span class="label">
+          最後更新 (本地時間)
+          <button class="refresh-btn" id="refreshBtn" onclick="forceRefresh()" title="立即強制更新">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+              <path d="M21 12a9 9 0 1 1-3-6.7"/>
+              <path d="M21 3v6h-6"/>
+            </svg>
+          </button>
+        </span>
       </div>
       <div>
         <span class="value" id="aircraftCount">0</span>
@@ -600,8 +663,37 @@
     `).join('');
   }
 
+  // ---- 歷史紀錄「刪除」是本機隱藏，不是真的改動 GitHub 上的 state.json ----
+  // (dashboard 是純前端靜態頁面，沒有寫入 repo 的權限，也不該把有寫入權限的
+  //  GitHub token 放進公開網頁裡，所以用瀏覽器 localStorage 記住「不想看的項目」)
+  const HIDDEN_KEY = 'squawk_hidden_history';
+
+  function getHiddenSet() {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(HIDDEN_KEY) || '[]'));
+    } catch {
+      return new Set();
+    }
+  }
+
+  function hideHistoryItem(id) {
+    const hidden = getHiddenSet();
+    hidden.add(id);
+    localStorage.setItem(HIDDEN_KEY, JSON.stringify([...hidden]));
+    refresh();
+  }
+  window.hideHistoryItem = hideHistoryItem;
+
+  function historyItemId(a) {
+    return `${a.icao24}_${a.detected_at}`;
+  }
+
   function renderHistory(state) {
-    const history = (state.history || []).slice().reverse(); // 新的在上面
+    const hidden = getHiddenSet();
+    const history = (state.history || [])
+      .filter(a => !hidden.has(historyItemId(a)))
+      .slice()
+      .reverse(); // 新的在上面
     const listEl = document.getElementById('panelHistory');
     const tabCountEl = document.getElementById('tabHistoryCount');
 
@@ -618,8 +710,10 @@
 
     listEl.innerHTML = history.map(a => {
       const t = a.detected_at ? new Date(a.detected_at).toLocaleString('zh-TW', { hour12: false }) : '—';
+      const id = historyItemId(a);
       return `
         <div class="history-card">
+          <button class="delete-btn" onclick="hideHistoryItem('${id}')" title="從清單中移除（僅本機隱藏）">✕</button>
           <div class="callsign">${a.callsign || a.icao24}</div>
           <span class="code">SQUAWK ${a.squawk} · ${SQUAWK_MEANING[a.squawk] || ''}</span>
           <div class="meta">
@@ -658,6 +752,19 @@
       document.getElementById('lastUpdate').textContent = '讀取失敗';
     }
   }
+
+  function forceRefresh() {
+    const btn = document.getElementById('refreshBtn');
+    btn.classList.add('spinning');
+    btn.disabled = true;
+    refresh().finally(() => {
+      setTimeout(() => {
+        btn.classList.remove('spinning');
+        btn.disabled = false;
+      }, 400);
+    });
+  }
+  window.forceRefresh = forceRefresh;
 
   refresh();
   setInterval(refresh, REFRESH_MS);
